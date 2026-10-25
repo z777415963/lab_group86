@@ -61,7 +61,7 @@ size_t nr_free_pages(void) {
     return pmm_manager->nr_free_pages();
 }
 
-//lab2 function1 YOUR CODE
+//lab2 function1 2412412
 /* page_init - detect the physical memory and initialize the Page descriptors.
  *
  * The physical memory range is reported by the device tree in physical
