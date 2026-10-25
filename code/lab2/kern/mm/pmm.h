@@ -39,6 +39,10 @@ struct Page *alloc_pages(size_t n);
 void free_pages(struct Page *base, size_t n);
 size_t nr_free_pages(void); // number of free pages
 
+/* page-granular wrappers used by the SLUB allocator */
+void *kalloc(void);
+void kfree(void *pa);
+
 #define alloc_page() alloc_pages(1)
 #define free_page(page) free_pages(page, 1)
 
