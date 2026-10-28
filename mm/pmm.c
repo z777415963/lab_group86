@@ -1,6 +1,5 @@
 #include <default_pmm.h>
 #include <best_fit_pmm.h>
-#include <buddy_pmm.h>
 #include <defs.h>
 #include <error.h>
 #include <memlayout.h>
@@ -33,27 +32,9 @@ const struct pmm_manager *pmm_manager;
 
 static void check_alloc_page(void);
 
-/*
- * Page allocator selection.
- *
- *   0: Best-Fit  (default; keeps the lab2 Best-Fit test passing)
- *   1: Buddy System (task 3)
- *
- * Both modules are compiled into the kernel; only the selected one is used.
- * Change PMM_USE_BUDDY to 1 (or build with -DPMM_USE_BUDDY=1) to run the
- * Buddy System, then check_alloc_page() calls buddy_check() instead.
- */
-#ifndef PMM_USE_BUDDY
-#define PMM_USE_BUDDY 0
-#endif
-
 // init_pmm_manager - initialize a pmm_manager instance
 static void init_pmm_manager(void) {
-#if PMM_USE_BUDDY
-    pmm_manager = &buddy_pmm_manager;// lab2 task3 2413498
-#else
     pmm_manager = &best_fit_pmm_manager;
-#endif
     cprintf("memory management: %s\n", pmm_manager->name);
     pmm_manager->init();
 }
@@ -72,33 +53,6 @@ struct Page *alloc_pages(size_t n) {
 // free_pages - call pmm->free_pages to free a continuous n*PAGESIZE memory
 void free_pages(struct Page *base, size_t n) {
     pmm_manager->free_pages(base, n);
-}
-
-// kalloc - allocate one physical page and return its kernel virtual address
-void *kalloc(void) {
-    struct Page *page = alloc_pages(1);
-    if (page == NULL) {
-        return NULL;
-    }
-    // The whole physical memory is mapped at a fixed offset, so the virtual
-    // address of a page is simply its physical address plus va_pa_offset.
-    return (void *)(page2pa(page) + va_pa_offset);
-}
-
-// kfree - free a page previously returned by kalloc
-void kfree(void *pa) {
-    uintptr_t va = (uintptr_t)pa;
-    uintptr_t pa_addr;
-
-    if (pa == NULL) {
-        return;
-    }
-
-    pa_addr = va - va_pa_offset;
-    if (PPN(pa_addr) < nbase || PPN(pa_addr) >= npage) {
-        panic("kfree: invalid page address 0x%016lx", va);
-    }
-    free_pages(pa2page(pa_addr), 1);
 }
 
 // nr_free_pages - call pmm->nr_free_pages to get the size (nr*PAGESIZE)
