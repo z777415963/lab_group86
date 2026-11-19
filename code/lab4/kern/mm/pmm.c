@@ -283,14 +283,59 @@ struct Page *get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store)
     return NULL;
 }
 
-//LAB4 function1 YOUR CODE
+// Remove the valid mapping described by ptep. The page-table entry,
+// physical-page reference count and TLB must always be updated together.
+static inline void
+page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep)
+{
+    if (*ptep & PTE_V)
+    {
+        struct Page *page = pte2page(*ptep);
+        if (page_ref_dec(page) == 0)
+        {
+            free_page(page);
+        }
+        *ptep = 0;
+        tlb_invalidate(pgdir, la);
+    }
+}
 
+// page_remove - remove the mapping of linear address la if it exists.
+// This operation is intentionally idempotent: removing an unmapped address
+// has no effect.
+void
+page_remove(pde_t *pgdir, uintptr_t la)
+{
+    pte_t *ptep = get_pte(pgdir, la, 0);
+    if (ptep != NULL)
+    {
+        page_remove_pte(pgdir, la, ptep);
+    }
+}
 
+// page_insert - map page at la and set the requested permission bits.
+// Replacing an old mapping must also release the old page reference.
+int
+page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm)
+{
+    pte_t *ptep = get_pte(pgdir, la, 1);
+    if (ptep == NULL)
+    {
+        return -E_NO_MEM;
+    }
 
+    // Take the reference first. If la already maps the same page,
+    // page_remove_pte will drop the old reference and the net count is zero.
+    page_ref_inc(page);
+    if (*ptep & PTE_V)
+    {
+        page_remove_pte(pgdir, la, ptep);
+    }
 
-
-
-
+    *ptep = pte_create(page2ppn(page), perm);
+    tlb_invalidate(pgdir, la);
+    return 0;
+}
 // invalidate a TLB entry, but only if the page tables being
 // edited are the ones currently in use by the processor.
 void tlb_invalidate(pde_t *pgdir, uintptr_t la)
