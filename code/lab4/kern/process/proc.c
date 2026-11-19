@@ -220,6 +220,158 @@ init_main(void *arg)
 
 //LAB4 function2 YOUR CODE
 
+// alloc_proc - allocate and initialize a process control block
+static struct proc_struct *
+alloc_proc(void)
+{
+    struct proc_struct *proc = kmalloc(sizeof(struct proc_struct));
+    if (proc == NULL)
+    {
+        return NULL;
+    }
+
+    memset(proc, 0, sizeof(struct proc_struct));
+    proc->state = PROC_UNINIT;
+    proc->pid = -1;
+    proc->runs = 0;
+    proc->kstack = 0;
+    proc->need_resched = 0;
+    proc->parent = NULL;
+    proc->mm = NULL;
+    proc->tf = NULL;
+    proc->pgdir = boot_pgdir_pa;
+    proc->flags = 0;
+    list_init(&proc->list_link);
+    list_init(&proc->hash_link);
+    return proc;
+}
+
+// proc_init - initialize the process table and create the first kernel thread
+void
+proc_init(void)
+{
+    int i;
+
+    list_init(&proc_list);
+    for (i = 0; i < HASH_LIST_SIZE; i++)
+    {
+        list_init(hash_list + i);
+    }
+
+    if ((idleproc = alloc_proc()) == NULL)
+    {
+        panic("cannot alloc idleproc.\n");
+    }
+    idleproc->pid = 0;
+    idleproc->state = PROC_RUNNABLE;
+    idleproc->kstack = (uintptr_t)bootstack;
+    idleproc->need_resched = 1;
+    set_proc_name(idleproc, "idle");
+    nr_process = 1;
+    current = idleproc;
+
+    int pid = kernel_thread(init_main, "Hello world!!", 0);
+    if (pid <= 0)
+    {
+        panic("cannot alloc initproc.\n");
+    }
+    initproc = find_proc(pid);
+    if (initproc == NULL)
+    {
+        panic("cannot find initproc.\n");
+    }
+    set_proc_name(initproc, "init");
+    assert(initproc->pid == 1);
+    assert(nr_process == 2);
+}
+
+// kernel_thread - create a kernel thread starting at fn(arg)
+int
+kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags)
+{
+    struct trapframe tf;
+
+    memset(&tf, 0, sizeof(tf));
+    tf.gpr.s0 = (uintptr_t)fn;
+    tf.gpr.s1 = (uintptr_t)arg;
+    tf.status = (read_csr(sstatus) | SSTATUS_SPP | SSTATUS_SPIE) & ~SSTATUS_SIE;
+    tf.epc = (uintptr_t)kernel_thread_entry;
+    return do_fork(clone_flags | CLONE_VM, 0, &tf);
+}
+
+// copy_mm - kernel threads in this lab all use the boot address space
+static int
+copy_mm(uint32_t clone_flags, struct proc_struct *proc)
+{
+    (void)clone_flags;
+    (void)proc;
+    assert(current->mm == NULL);
+    return 0;
+}
+
+// copy_thread - copy the initial trap frame onto the new kernel stack
+static void
+copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf)
+{
+    proc->tf = (struct trapframe *)(proc->kstack + KSTACKSIZE - sizeof(struct trapframe));
+    *(proc->tf) = *tf;
+    proc->tf->gpr.a0 = 0;
+    if (esp != 0)
+    {
+        proc->tf->gpr.sp = esp;
+    }
+    proc->context.ra = (uintptr_t)forkret;
+    proc->context.sp = (uintptr_t)proc->tf;
+}
+
+// do_fork - create a process and make it runnable
+int
+do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
+{
+    int ret = -E_NO_FREE_PROC;
+    struct proc_struct *proc;
+    bool intr_flag;
+
+    if (nr_process >= MAX_PROCESS)
+    {
+        return ret;
+    }
+
+    ret = -E_NO_MEM;
+    if ((proc = alloc_proc()) == NULL)
+    {
+        return ret;
+    }
+    proc->parent = current;
+
+    if (setup_kstack(proc) != 0)
+    {
+        kfree(proc);
+        return ret;
+    }
+
+    if (copy_mm(clone_flags, proc) != 0)
+    {
+        put_kstack(proc);
+        kfree(proc);
+        return ret;
+    }
+
+    copy_thread(proc, stack, tf);
+
+    local_intr_save(intr_flag);
+    {
+        proc->pid = get_pid();
+        hash_proc(proc);
+        list_add(&proc_list, &proc->list_link);
+        nr_process++;
+    }
+    local_intr_restore(intr_flag);
+
+    wakeup_proc(proc);
+    return proc->pid;
+}
+
 
 //LAB4 function3 2412412
 /* proc_run - make process "proc" running on cpu
